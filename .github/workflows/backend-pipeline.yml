@@ -1,0 +1,57 @@
+name: Backend Pipeline
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+    - main
+    paths:
+    - 'dvn-nov-apps/backend/**'
+env:
+  BACKEND_REPOSITORY: dvn-nov-workshop/production/backend
+  IMAGE_TAG: ${{ github.sha }}
+
+permissions:
+  contents: read
+  id-token: write
+  
+jobs:
+  backend-job:
+    name: Backend Job
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v5.1.0
+      with:
+        aws-region: us-east-1
+        role-to-assume: arn:aws:iam::654654554686:role/workshop-nov-eks-github-role
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag, and push docker image to Amazon ECR
+      env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      run: |
+          docker build -f ./dvn-nov-apps/backend/YoutubeLiveApp/Dockerfile -t $REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG ./dvn-nov-apps/backend/YoutubeLiveApp
+          docker push $REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG
+
+    - uses: actions/checkout@v5
+      with:
+        repository: kenerry-serain/dvn-workshop-nov-dia-2-gitops
+        token: ${{ secrets.PAT }}
+
+    - name: Kustomize Edit Set Image
+      env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      run: |
+          kustomize edit set image $REGISTRY/$BACKEND_REPOSITORY=$REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ./kustomization.yml
+          git commit -m "[BOT] Updated Image to $REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG"
+          git push
